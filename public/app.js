@@ -151,6 +151,7 @@ function loadVideo(file) {
     notify('Escolha um arquivo de vídeo válido.');
     return;
   }
+  if (newsClip) removeNews();
   videoFile = file;
   if (videoUrl) URL.revokeObjectURL(videoUrl);
   videoUrl = URL.createObjectURL(file);
@@ -453,6 +454,7 @@ dropZone.addEventListener('drop', (event) => {
   loadVideo(event.dataTransfer.files[0]);
 });
 document.querySelector('#remove-video').addEventListener('click', () => {
+  if (newsClip) removeNews();
   if (videoUrl) URL.revokeObjectURL(videoUrl);
   videoUrl = null;
   videoFile = null;
@@ -483,7 +485,6 @@ document.querySelector('#set-in-button').addEventListener('click', () => setTrim
 document.querySelector('#set-out-button').addEventListener('click', () => setTrim(Number(startInput.value), video.currentTime));
 startInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
 endInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
-  if (newsClip) removeNews();
   video.addEventListener('timeupdate', updateTimeline);
 video.addEventListener('seeked', updateTimeline);
 analyzeButton.addEventListener('click', analyzeVideo);

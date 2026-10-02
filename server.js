@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import chromium from '@sparticuz/chromium';
-import { chmod, mkdtemp, rm, unlink } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';

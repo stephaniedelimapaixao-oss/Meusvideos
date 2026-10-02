@@ -87,7 +87,7 @@ button { color: inherit; }
 .motion-card:hover, .motion-card.is-selected { border-color: #9ab963; background: #273024; }
 .motion-number { grid-row: 1 / 3; color: var(--lime); font: 10px var(--mono); }
 .motion-card strong { overflow: hidden; color: #dce3d6; font-size: 9px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.motion-card small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 8px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.motion-card small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: 8px; line-height: 1.45; line-clamp: 2; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .motion-card-2 .motion-number { color: var(--coral); }.motion-card-3 .motion-number { color: #9ac8cf; }.motion-card-4 .motion-number { color: #d4b078; }
 .motion-editor { margin-top: 10px; padding: 11px; border: 1px solid var(--line); border-radius: 4px; background: #19201b; }
 .motion-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }

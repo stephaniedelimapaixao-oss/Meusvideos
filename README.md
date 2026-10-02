@@ -23,6 +23,10 @@ Editor de vídeo local com análise do Gemini e quatro modelos de motion renderi
 - A exportação acontece em tempo real no navegador; deixe a aba aberta até o download começar.
 - Os motions são compostos e renderizados localmente pelo HyperFrames em MP4, sem conta ou renderização paga.
 
+## Inserir notícia
+
+Com um vídeo carregado, pause no ponto desejado e selecione **Inserir notícia**. O Playwright captura a área visível (1280 × 720) de um link HTTP(S) público. A imagem entra por 4,5 segundos com animação e também é incluída na exportação WebM do trecho selecionado. Links para localhost, redes privadas, portas personalizadas e protocolos que não sejam HTTP(S) são bloqueados.
+
 ## Modelos de motion
 
 - Título animado
