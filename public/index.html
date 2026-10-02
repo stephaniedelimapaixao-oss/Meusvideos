@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#171b18">
+    <title>Meusvídeos | Editor com Claude</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Meusvídeos, início">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>meus<span class="brand-light">vídeos</span></span>
+      </a>
+      <div class="project-name"><span class="live-dot"></span><span id="project-label">Projeto sem título</span></div>
+      <div class="topbar-right">
+        <span id="connection-status" class="connection"><span class="status-dot"></span><span>Conectando</span></span>
+        <button id="export-button" class="button button-export" disabled><span aria-hidden="true">↓</span> Exportar trecho</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="source-panel panel">
+        <div class="panel-heading"><span class="eyebrow">01 / MÍDIA</span><span class="panel-count">LOCAL</span></div>
+        <label id="drop-zone" class="drop-zone" for="video-input">
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <span class="drop-title">Escolha seu vídeo</span>
+          <span class="drop-hint">MP4, MOV ou WebM · permanece no seu dispositivo</span>
+          <input id="video-input" type="file" accept="video/*">
+        </label>
+        <div class="source-file" id="source-file" hidden>
+          <span class="file-icon" aria-hidden="true">▧</span>
+          <span class="file-details"><strong id="file-name">Nenhum arquivo</strong><small id="file-meta">—</small></span>
+          <button id="remove-video" class="icon-button" aria-label="Remover vídeo" title="Remover vídeo">×</button>
+        </div>
+        <div class="source-note"><span class="note-mark">i</span><p>O arquivo não é enviado. O Claude recebe até 8 quadros para analisar a cena.</p></div>
+        <div class="source-footer"><span>ARQUIVO DE ORIGEM</span><span id="source-duration">00:00</span></div>
+      </aside>
+
+      <section class="edit-panel panel" aria-label="Área de edição">
+        <div class="panel-heading"><span class="eyebrow">02 / EDIÇÃO</span><span id="edit-state" class="panel-count">AGUARDANDO MÍDIA</span></div>
+        <div class="preview-stage" id="preview-stage">
+          <div class="preview-empty" id="preview-empty"><span class="preview-glyph" aria-hidden="true">▶</span><p>Seu vídeo aparece aqui</p></div>
+          <video id="video-preview" controls playsinline hidden></video>
+          <div class="preview-label"><span class="live-dot"></span> PRÉVIA</div>
+        </div>
+
+        <div class="transport-row">
+          <span id="current-time" class="timecode">00:00.0</span>
+          <div class="transport-actions"><button id="set-in-button" class="button button-small" disabled>Marcar entrada</button><button id="set-out-button" class="button button-small" disabled>Marcar saída</button></div>
+          <span id="total-time" class="timecode">00:00.0</span>
+        </div>
+
+        <div class="timeline-wrap">
+          <div class="timeline-scale"><span>00:00</span><span id="middle-time">00:00</span><span id="end-time">00:00</span></div>
+          <div class="timeline" id="timeline"><div class="timeline-track"></div><div class="timeline-selected" id="timeline-selected"></div><div class="timeline-playhead" id="timeline-playhead"></div></div>
+          <div class="trim-fields">
+            <label>ENTRADA <span><input id="trim-start" type="number" min="0" step="0.1" value="0" disabled> s</span></label>
+            <span class="trim-divider"></span>
+            <label>SAÍDA <span><input id="trim-end" type="number" min="0" step="0.1" value="0" disabled> s</span></label>
+            <span class="trim-duration" id="trim-duration">0 s selecionados</span>
+          </div>
+        </div>
+
+        <div class="edit-footer"><span>PROPORÇÃO ORIGINAL</span><span>SAÍDA WEBM</span></div>
+      </section>
+
+      <aside class="assistant-panel panel">
+        <div class="panel-heading"><span class="eyebrow">03 / DIREÇÃO</span><span class="claude-badge"><span>✳</span> CLAUDE</span></div>
+        <div class="assistant-intro"><h1>Um olhar a mais<br>na sua edição.</h1><p>Peça uma leitura do material. Receba ideias de cortes, título e roteiro.</p></div>
+        <label class="direction-label" for="direction-input">O QUE VOCÊ QUER CRIAR?</label>
+        <textarea id="direction-input" rows="3" placeholder="Ex.: um vídeo dinâmico de 30 segundos para apresentar meu café"></textarea>
+        <button id="analyze-button" class="button button-analyze" disabled><span class="sparkle" aria-hidden="true">✳</span> Analisar com Claude <span class="button-arrow" aria-hidden="true">↗</span></button>
+        <p id="analysis-error" class="inline-error" role="alert" hidden></p>
+        <div id="analysis-results" class="analysis-results" hidden>
+          <div class="result-divider"><span>LEITURA DO MATERIAL</span></div>
+          <h2 id="result-title"></h2><p id="result-summary" class="result-summary"></p>
+          <div id="segment-list" class="segment-list"></div>
+          <div class="script-block"><span class="eyebrow">ESTRUTURA / ROTEIRO</span><p id="result-script"></p></div>
+        </div>
+        <div id="assistant-hint" class="assistant-hint"><span aria-hidden="true">↖</span> Adicione um vídeo para começar a conversa.</div>
+      </aside>
+    </main>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

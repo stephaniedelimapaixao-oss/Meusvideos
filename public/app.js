@@ -1,0 +1,301 @@
+const videoInput = document.querySelector('#video-input');
+const video = document.querySelector('#video-preview');
+const previewEmpty = document.querySelector('#preview-empty');
+const dropZone = document.querySelector('#drop-zone');
+const sourceFile = document.querySelector('#source-file');
+const analyzeButton = document.querySelector('#analyze-button');
+const exportButton = document.querySelector('#export-button');
+const startInput = document.querySelector('#trim-start');
+const endInput = document.querySelector('#trim-end');
+const connectionStatus = document.querySelector('#connection-status');
+const analysisResults = document.querySelector('#analysis-results');
+const assistantHint = document.querySelector('#assistant-hint');
+const timelineSelected = document.querySelector('#timeline-selected');
+const timelinePlayhead = document.querySelector('#timeline-playhead');
+const toast = document.querySelector('#toast');
+
+let videoUrl = null;
+let duration = 0;
+let analysis = null;
+let activeSegment = -1;
+let toastTimer;
+
+function formatTime(seconds, decimals = 0) {
+  if (!Number.isFinite(seconds)) return '00:00';
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const remaining = (seconds % 60).toFixed(decimals).padStart(decimals ? 4 : 2, '0');
+  return `${minutes}:${remaining}`;
+}
+
+function notify(message) {
+  toast.textContent = message;
+  toast.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 3200);
+}
+
+function setTrim(start, end) {
+  const safeStart = Math.max(0, Math.min(duration, Number(start) || 0));
+  const safeEnd = Math.max(safeStart + 0.1, Math.min(duration, Number(end) || duration));
+  startInput.value = safeStart.toFixed(1);
+  endInput.value = Math.min(duration, safeEnd).toFixed(1);
+  updateTimeline();
+}
+
+function updateTimeline() {
+  const start = Number(startInput.value) || 0;
+  const end = Number(endInput.value) || duration;
+  timelineSelected.style.left = `${duration ? (start / duration) * 100 : 0}%`;
+  timelineSelected.style.width = `${duration ? ((end - start) / duration) * 100 : 100}%`;
+  timelinePlayhead.style.left = `${duration ? (video.currentTime / duration) * 100 : 0}%`;
+  document.querySelector('#trim-duration').textContent = `${Math.max(0, end - start).toFixed(1)} s selecionados`;
+  document.querySelector('#current-time').textContent = formatTime(video.currentTime, 1);
+  exportButton.disabled = !(videoUrl && end > start && end <= duration);
+  document.querySelector('#set-in-button').disabled = !videoUrl;
+  document.querySelector('#set-out-button').disabled = !videoUrl;
+}
+
+function loadVideo(file) {
+  if (!file || !file.type.startsWith('video/')) {
+    notify('Escolha um arquivo de vídeo válido.');
+    return;
+  }
+  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  videoUrl = URL.createObjectURL(file);
+  video.src = videoUrl;
+  video.hidden = false;
+  previewEmpty.hidden = true;
+  sourceFile.hidden = false;
+  document.querySelector('#file-name').textContent = file.name;
+  document.querySelector('#file-meta').textContent = `${(file.size / 1024 / 1024).toFixed(1)} MB`;
+  document.querySelector('#project-label').textContent = file.name.replace(/\.[^.]+$/, '');
+  document.querySelector('#edit-state').textContent = 'MÍDIA CARREGADA';
+  assistantHint.hidden = false;
+  assistantHint.innerHTML = '<span aria-hidden="true">↖</span> Escreva o objetivo da edição e peça uma análise.';
+  analysisResults.hidden = true;
+  analysis = null;
+  activeSegment = -1;
+  analyzeButton.disabled = false;
+  startInput.disabled = true;
+  endInput.disabled = true;
+  video.onloadedmetadata = () => {
+    duration = video.duration;
+    document.querySelector('#total-time').textContent = formatTime(duration, 1);
+    document.querySelector('#source-duration').textContent = formatTime(duration);
+    document.querySelector('#end-time').textContent = formatTime(duration);
+    document.querySelector('#middle-time').textContent = formatTime(duration / 2);
+    startInput.disabled = false;
+    endInput.disabled = false;
+    startInput.max = duration;
+    endInput.max = duration;
+    setTrim(0, duration);
+    document.querySelector('#edit-state').textContent = 'PRONTO PARA EDITAR';
+  };
+  videoInput.value = '';
+}
+
+async function captureFrames() {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const count = Math.min(8, Math.max(3, Math.ceil(duration / 20)));
+  const times = Array.from({ length: count }, (_, index) => duration * ((index + 0.5) / count));
+  const previousTime = video.currentTime;
+  const wasPlaying = !video.paused;
+  video.pause();
+  canvas.width = Math.min(960, video.videoWidth);
+  canvas.height = Math.round(canvas.width * video.videoHeight / video.videoWidth);
+  const frames = [];
+
+  for (const time of times) {
+    if (Math.abs(video.currentTime - time) > 0.05) {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Tempo esgotado ao ler o vídeo.')), 5000);
+        video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(); }, { once: true });
+        video.currentTime = time;
+      });
+    }
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    frames.push({ time, image: canvas.toDataURL('image/jpeg', 0.72) });
+  }
+
+  video.currentTime = previousTime;
+  if (wasPlaying) await video.play().catch(() => {});
+  return frames;
+}
+
+function renderAnalysis(plan) {
+  analysis = plan;
+  document.querySelector('#result-title').textContent = plan.title || 'Sugestão de edição';
+  document.querySelector('#result-summary').textContent = plan.summary || '';
+  document.querySelector('#result-script').textContent = plan.script || 'Sem sugestão de roteiro.';
+  const list = document.querySelector('#segment-list');
+  list.replaceChildren();
+  plan.segments.forEach((segment, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'segment-card';
+    button.innerHTML = '<span class="segment-head"><span></span><span class="segment-time"></span></span><p></p>';
+    button.querySelector('.segment-head span:first-child').textContent = segment.label;
+    button.querySelector('.segment-time').textContent = `${formatTime(segment.start, 1)} — ${formatTime(segment.end, 1)}`;
+    button.querySelector('p').textContent = segment.reason;
+    button.addEventListener('click', () => {
+      activeSegment = index;
+      document.querySelectorAll('.segment-card').forEach((item, itemIndex) => item.classList.toggle('is-active', itemIndex === index));
+      setTrim(segment.start, segment.end);
+      video.currentTime = segment.start;
+    });
+    list.append(button);
+  });
+  analysisResults.hidden = false;
+  assistantHint.hidden = true;
+  document.querySelector('#edit-state').textContent = `${plan.segments.length} TRECHO${plan.segments.length === 1 ? '' : 'S'} SUGERIDO${plan.segments.length === 1 ? '' : 'S'}`;
+}
+
+async function analyzeVideo() {
+  if (!videoUrl || !duration) return;
+  analyzeButton.disabled = true;
+  document.querySelector('#analysis-error').hidden = true;
+  analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Lendo os quadros…';
+  try {
+    const frames = await captureFrames();
+    analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Pensando na edição…';
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ duration, frames, direction: document.querySelector('#direction-input').value }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível analisar o vídeo.');
+    renderAnalysis(result);
+  } catch (error) {
+    const errorElement = document.querySelector('#analysis-error');
+    errorElement.textContent = error.message || 'Falha ao analisar o vídeo.';
+    errorElement.hidden = false;
+  } finally {
+    analyzeButton.disabled = !videoUrl;
+    analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Analisar com Claude <span class="button-arrow" aria-hidden="true">↗</span>';
+  }
+}
+
+function waitForSeek(time) {
+  if (Math.abs(video.currentTime - time) < 0.05) return Promise.resolve();
+  return new Promise((resolve) => {
+    video.addEventListener('seeked', resolve, { once: true });
+    video.currentTime = time;
+  });
+}
+
+async function exportSelection() {
+  const start = Number(startInput.value);
+  const end = Number(endInput.value);
+  if (!video.captureStream || !window.MediaRecorder) {
+    notify('A exportação de vídeo exige um navegador Chromium atualizado.');
+    return;
+  }
+  exportButton.disabled = true;
+  exportButton.textContent = 'Preparando…';
+  try {
+    video.pause();
+    await waitForSeek(start);
+    const stream = video.captureStream();
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks = [];
+    const finished = new Promise((resolve, reject) => {
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('Falha ao gravar o trecho.'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+    });
+    recorder.start();
+    await video.play();
+    await new Promise((resolve, reject) => {
+      const checkEnd = () => {
+        if (video.currentTime >= end || video.ended) {
+          video.pause();
+          if (recorder.state !== 'inactive') recorder.stop();
+          resolve();
+        }
+      };
+      const timeout = setTimeout(() => {
+        video.pause();
+        if (recorder.state !== 'inactive') recorder.stop();
+        reject(new Error('Tempo esgotado durante a exportação.'));
+      }, Math.max(15000, (end - start) * 3000));
+      video.addEventListener('timeupdate', checkEnd);
+      recorder.addEventListener('stop', () => {
+        clearTimeout(timeout);
+        video.removeEventListener('timeupdate', checkEnd);
+      }, { once: true });
+      video.addEventListener('error', () => reject(new Error('Não foi possível reproduzir o vídeo para exportação.')), { once: true });
+    });
+    const blob = await finished;
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${(analysis?.title || 'meusvideos').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.webm`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    notify('Trecho exportado em WebM.');
+  } catch (error) {
+    notify(error.message || 'Falha ao exportar o trecho.');
+  } finally {
+    exportButton.innerHTML = '<span aria-hidden="true">↓</span> Exportar trecho';
+    updateTimeline();
+  }
+}
+
+videoInput.addEventListener('change', (event) => loadVideo(event.target.files[0]));
+dropZone.addEventListener('dragover', (event) => { event.preventDefault(); dropZone.classList.add('is-dragging'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('is-dragging'));
+dropZone.addEventListener('drop', (event) => {
+  event.preventDefault();
+  dropZone.classList.remove('is-dragging');
+  loadVideo(event.dataTransfer.files[0]);
+});
+document.querySelector('#remove-video').addEventListener('click', () => {
+  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  videoUrl = null;
+  duration = 0;
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.hidden = true;
+  previewEmpty.hidden = false;
+  sourceFile.hidden = true;
+  analyzeButton.disabled = true;
+  exportButton.disabled = true;
+  startInput.value = '0';
+  endInput.value = '0';
+  startInput.disabled = true;
+  endInput.disabled = true;
+  document.querySelector('#edit-state').textContent = 'AGUARDANDO MÍDIA';
+  document.querySelector('#project-label').textContent = 'Projeto sem título';
+  document.querySelector('#source-duration').textContent = '00:00';
+  document.querySelector('#total-time').textContent = '00:00.0';
+  document.querySelector('#current-time').textContent = '00:00.0';
+  analysisResults.hidden = true;
+  assistantHint.hidden = false;
+  assistantHint.innerHTML = '<span aria-hidden="true">↖</span> Adicione um vídeo para começar a conversa.';
+  updateTimeline();
+});
+document.querySelector('#set-in-button').addEventListener('click', () => setTrim(video.currentTime, Number(endInput.value)));
+document.querySelector('#set-out-button').addEventListener('click', () => setTrim(Number(startInput.value), video.currentTime));
+startInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
+endInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
+video.addEventListener('timeupdate', updateTimeline);
+video.addEventListener('seeked', updateTimeline);
+analyzeButton.addEventListener('click', analyzeVideo);
+exportButton.addEventListener('click', exportSelection);
+
+fetch('/api/status').then((response) => response.json()).then((status) => {
+  if (status.configured) {
+    connectionStatus.classList.add('is-ready');
+    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Claude conectado</span>';
+  } else {
+    connectionStatus.classList.add('is-offline');
+    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Configure a API</span>';
+  }
+}).catch(() => {
+  connectionStatus.classList.add('is-offline');
+  connectionStatus.innerHTML = '<span class="status-dot"></span><span>Servidor indisponível</span>';
+});
