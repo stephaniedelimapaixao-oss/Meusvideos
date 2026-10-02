@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR" data-composition-variables='[{"id":"name","type":"string","label":"Nome","default":"Marina Costa"},{"id":"role","type":"string","label":"Identificação","default":"Diretora criativa"}]'>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Lower third</title>
+    <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; margin: 0; overflow: hidden; background: #d9ded2; color: #172019; font-family: Arial, sans-serif; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(135deg, #e3e6dc, #cbd2c4); }
+      .texture { position: absolute; inset: 0; opacity: .36; background: repeating-linear-gradient(0deg, transparent 0 79px, #87917f 80px, transparent 81px); }
+      .safe-area { position: absolute; right: 0; bottom: 110px; left: 130px; display: flex; align-items: stretch; max-width: 1120px; }
+      .rail { width: 10px; flex: none; background: #e18d76; transform-origin: bottom center; }
+      .panel { padding: 27px 36px 31px; background: #f1f1e8; }
+      .name { display: block; color: #18231a; font-size: 47px; line-height: 1.12; font-weight: 700; }
+      .role { display: block; margin-top: 8px; color: #586456; font-size: 25px; line-height: 1.2; }
+      .signature { position: absolute; top: 76px; right: 84px; color: #5f6d5b; font: 16px/1 monospace; }
+    </style>
+  </head>
+  <body>
+    <main id="root" data-composition-id="lower" data-start="0" data-width="1920" data-height="1080" data-duration="6">
+      <div class="texture" aria-hidden="true"></div>
+      <section class="safe-area clip" data-start="0" data-duration="6" data-track-index="0">
+        <div class="rail" aria-hidden="true"></div>
+        <div class="panel"><span class="name" data-var-text="name">Marina Costa</span><span class="role" data-var-text="role">Diretora criativa</span></div>
+      </section>
+      <span class="signature">PERFIL / 01</span>
+    </main>
+    <script>
+      const timeline = gsap.timeline({ paused: true });
+      timeline.fromTo('.rail', { scaleY: 0 }, { scaleY: 1, duration: 0.42, ease: 'power3.out' }, 0.3);
+      timeline.fromTo('.panel', { opacity: 0, x: -34 }, { opacity: 1, x: 0, duration: 0.62, ease: 'power3.out' }, 0.48);
+      timeline.fromTo('.role', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.38, ease: 'power2.out' }, 0.86);
+      window.__timelines.lower = timeline;
+    </script>
+  </body>
+</html>

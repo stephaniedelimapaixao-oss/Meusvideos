@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR" data-composition-variables='[{"id":"caption","type":"string","label":"Texto","default":"Toda boa história começa com uma ideia"}]'>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Legenda palavra por palavra</title>
+    <script src="../node_modules/gsap/dist/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; margin: 0; overflow: hidden; background: #17211d; color: #f4f2e8; font-family: Arial, sans-serif; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; background: linear-gradient(140deg, #1b2823, #26362e 56%, #18221d); }
+      .lines { position: absolute; inset: 0; opacity: .14; background: repeating-linear-gradient(135deg, transparent 0 62px, #b7c5a4 63px, transparent 64px); }
+      .caption-wrap { position: absolute; right: 150px; bottom: 115px; left: 150px; display: flex; justify-content: center; }
+      .caption { max-width: 1550px; display: flex; flex-wrap: wrap; justify-content: center; column-gap: 17px; row-gap: 5px; padding: 34px 46px; border: 1px solid #ffffff33; border-radius: 12px; background: #111914e8; text-align: center; }
+      .word { display: inline-block; color: #f1f0e8; font-size: 66px; line-height: 1.25; font-weight: 700; transform-origin: center center; }
+      .eyebrow { position: absolute; right: 0; bottom: 59px; left: 0; color: #bfccbc; font: 15px/1 monospace; text-align: center; }
+      .pip { position: absolute; top: 68px; left: 82px; width: 12px; height: 12px; border-radius: 50%; background: #e18d76; }
+    </style>
+  </head>
+  <body>
+    <main id="root" data-composition-id="legenda" data-start="0" data-width="1920" data-height="1080" data-duration="8">
+      <div class="lines" aria-hidden="true"></div><span class="pip" aria-hidden="true"></span>
+      <section class="caption-wrap clip" data-start="0" data-duration="8" data-track-index="0"><div class="caption" id="caption"></div></section>
+      <span class="eyebrow">LEGENDA CINÉTICA / PALAVRA POR PALAVRA</span>
+    </main>
+    <script>
+      const { caption } = window.__hyperframes.getVariables();
+      const container = document.querySelector('#caption');
+      const words = caption.trim().split(/\s+/).filter(Boolean).slice(0, 14).map((text) => {
+        const word = document.createElement('span');
+        word.className = 'word';
+        word.textContent = text;
+        container.append(word);
+        return word;
+      });
+      const timeline = gsap.timeline({ paused: true });
+      timeline.fromTo('.caption', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.38, ease: 'power3.out' }, 0.2);
+      words.forEach((word, index) => {
+        const at = 0.75 + index * 0.46;
+        timeline.to(word, { color: '#c4e879', scale: 1.08, duration: 0.12, ease: 'power2.out' }, at);
+        timeline.to(word, { color: '#f1f0e8', scale: 1, duration: 0.2, ease: 'power2.out' }, at + 0.27);
+      });
+      window.__timelines.legenda = timeline;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://hyperframes.heygen.com/schema/hyperframes.json",
+  "paths": {
+    "blocks": "motions",
+    "components": "motions/components",
+    "assets": "motions/assets"
+  },
+  "media": {
+    "autoProxy": false
+  }
+}

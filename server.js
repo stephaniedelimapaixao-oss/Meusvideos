@@ -2,9 +2,10 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
-import { unlink } from 'node:fs/promises';
+import { chmod, mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
+import path, { delimiter } from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 dotenv.config();
@@ -12,7 +13,41 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-const publicDirectory = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
+const publicDirectory = path.join(projectDirectory, 'public');
+const hyperframesCli = path.join(projectDirectory, 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs');
+const ffmpegDirectory = path.join(projectDirectory, 'node_modules', '@ffmpeg-installer', 'linux-x64');
+const ffmpegBinary = path.join(ffmpegDirectory, 'ffmpeg');
+const motionTemplates = [
+  {
+    id: 'titulo-animado', name: 'Título animado', description: 'Tipografia em foco com entrada ascendente e acento gráfico.', duration: 5,
+    file: 'titulo-animado.html', fields: [
+      { id: 'eyebrow', label: 'Chamada', placeholder: 'UMA IDEIA EM MOVIMENTO', default: 'UMA IDEIA EM MOVIMENTO', maxLength: 60 },
+      { id: 'title', label: 'Título', placeholder: 'Sua mensagem', default: 'Sua mensagem', maxLength: 70 },
+    ],
+  },
+  {
+    id: 'lower-third', name: 'Lower third', description: 'Identificação elegante para entrevistas e vídeos de apresentação.', duration: 6,
+    file: 'lower-third.html', fields: [
+      { id: 'name', label: 'Nome', placeholder: 'Nome da pessoa', default: 'Marina Costa', maxLength: 60 },
+      { id: 'role', label: 'Identificação', placeholder: 'Cargo ou contexto', default: 'Diretora criativa', maxLength: 80 },
+    ],
+  },
+  {
+    id: 'legenda-palavra', name: 'Legenda palavra por palavra', description: 'Destaque sequencial para uma frase curta ou chamada.', duration: 8,
+    file: 'legenda-palavra.html', fields: [
+      { id: 'caption', label: 'Texto', placeholder: 'Escreva até 14 palavras', default: 'Toda boa história começa com uma ideia', maxLength: 120 },
+    ],
+  },
+  {
+    id: 'abertura', name: 'Abertura', description: 'Vinheta de marca com título, assinatura e formas em movimento.', duration: 8,
+    file: 'abertura.html', fields: [
+      { id: 'brand', label: 'Marca', placeholder: 'Nome da marca', default: 'MEUSVÍDEOS', maxLength: 40 },
+      { id: 'title', label: 'Título', placeholder: 'Título do vídeo', default: 'Novos caminhos', maxLength: 70 },
+      { id: 'subtitle', label: 'Complemento', placeholder: 'Uma linha de contexto', default: 'Histórias que merecem ser vistas', maxLength: 90 },
+    ],
+  },
+];
 const upload = multer({
   dest: tmpdir(),
   limits: { fileSize: 200 * 1024 * 1024 },
@@ -20,6 +55,63 @@ const upload = multer({
 });
 
 app.use(express.static(publicDirectory));
+app.use(express.json({ limit: '20kb' }));
+
+app.get('/api/motions', (_request, response) => {
+  response.json(motionTemplates.map(({ id, name, description, duration, fields }) => ({ id, name, description, duration, fields })));
+});
+
+app.post('/api/motions/render', async (request, response) => {
+  const template = motionTemplates.find((item) => item.id === request.body?.id);
+  if (!template) return response.status(400).json({ error: 'Escolha um modelo de motion válido.' });
+  if (request.body?.variables === null || typeof request.body.variables !== 'object' || Array.isArray(request.body.variables)) {
+    return response.status(400).json({ error: 'Os campos do modelo estão inválidos.' });
+  }
+
+  const variables = Object.fromEntries(template.fields.map((field) => {
+    const value = request.body.variables[field.id];
+    return [field.id, typeof value === 'string' ? value.trim().slice(0, field.maxLength) : field.default];
+  }));
+  const renderDirectory = await mkdtemp(path.join(tmpdir(), 'meusvideos-motion-'));
+  const outputFile = path.join(renderDirectory, `${template.id}.mp4`);
+
+  try {
+    await chmod(ffmpegBinary, 0o755);
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        hyperframesCli, 'render', projectDirectory,
+        '--composition', path.join('motions', template.file),
+        '--output', outputFile,
+        '--fps', '30', '--quality', 'draft', '--workers', '1', '--low-memory-mode', '--no-browser-gpu',
+        '--variables', JSON.stringify(variables), '--strict',
+      ], {
+        cwd: projectDirectory,
+        env: { ...process.env, PATH: `${ffmpegDirectory}${delimiter}${process.env.PATH || ''}` },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let logs = '';
+      const collect = (chunk) => { logs = `${logs}${chunk}`.slice(-8000); };
+      const timeout = setTimeout(() => child.kill('SIGTERM'), 5 * 60 * 1000);
+      child.stdout.on('data', collect);
+      child.stderr.on('data', collect);
+      child.on('error', (error) => { clearTimeout(timeout); reject(error); });
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) resolve();
+        else reject(new Error(logs || `HyperFrames encerrou com código ${code}.`));
+      });
+    });
+
+    response.download(outputFile, `${template.id}.mp4`, async (error) => {
+      await rm(renderDirectory, { recursive: true, force: true });
+      if (error && !response.headersSent) response.status(500).json({ error: 'Não foi possível enviar o vídeo renderizado.' });
+    });
+  } catch (error) {
+    console.error('Falha no render HyperFrames:', error.message);
+    await rm(renderDirectory, { recursive: true, force: true });
+    return response.status(500).json({ error: 'A renderização local falhou. Verifique se o HyperFrames e o Chromium foram instalados.' });
+  }
+});
 
 app.get('/api/status', (_request, response) => {
   response.json({ configured: Boolean(process.env.GEMINI_API_KEY), model });

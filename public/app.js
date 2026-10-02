@@ -13,6 +13,10 @@ const assistantHint = document.querySelector('#assistant-hint');
 const timelineSelected = document.querySelector('#timeline-selected');
 const timelinePlayhead = document.querySelector('#timeline-playhead');
 const toast = document.querySelector('#toast');
+const motionGrid = document.querySelector('#motion-grid');
+const motionEditor = document.querySelector('#motion-editor');
+const motionFields = document.querySelector('#motion-fields');
+const renderMotionButton = document.querySelector('#render-motion-button');
 
 let videoUrl = null;
 let videoFile = null;
@@ -20,6 +24,8 @@ let duration = 0;
 let analysis = null;
 let activeSegment = -1;
 let toastTimer;
+let selectedMotion = null;
+let renderingMotion = false;
 
 function formatTime(seconds, decimals = 0) {
   if (!Number.isFinite(seconds)) return '00:00';
@@ -218,6 +224,85 @@ async function exportSelection() {
   }
 }
 
+function selectMotion(motion) {
+  selectedMotion = motion;
+  motionGrid.querySelectorAll('.motion-card').forEach((button) => {
+    button.classList.toggle('is-selected', button.dataset.motionId === motion.id);
+  });
+  motionFields.replaceChildren();
+  motion.fields.forEach((field) => {
+    const label = document.createElement('label');
+    label.className = 'motion-field';
+    label.textContent = field.label;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = field.id;
+    input.maxLength = field.maxLength;
+    input.placeholder = field.placeholder;
+    input.value = field.default;
+    label.append(input);
+    motionFields.append(label);
+  });
+  motionEditor.hidden = false;
+}
+
+async function loadMotions() {
+  try {
+    const response = await fetch('/api/motions');
+    if (!response.ok) throw new Error('Não foi possível carregar os modelos.');
+    const motions = await response.json();
+    motionGrid.replaceChildren();
+    motions.forEach((motion, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `motion-card motion-card-${index + 1}`;
+      button.dataset.motionId = motion.id;
+      button.innerHTML = '<span class="motion-number"></span><strong></strong><small></small>';
+      button.querySelector('.motion-number').textContent = String(index + 1).padStart(2, '0');
+      button.querySelector('strong').textContent = motion.name;
+      button.querySelector('small').textContent = `${motion.duration} s · ${motion.description}`;
+      button.addEventListener('click', () => selectMotion(motion));
+      motionGrid.append(button);
+    });
+    if (motions[0]) selectMotion(motions[0]);
+  } catch (error) {
+    motionGrid.textContent = error.message;
+  }
+}
+
+async function renderMotion() {
+  if (!selectedMotion || renderingMotion) return;
+  renderingMotion = true;
+  renderMotionButton.disabled = true;
+  renderMotionButton.innerHTML = '<span class="render-spinner" aria-hidden="true"></span> Renderizando localmente…';
+  try {
+    const variables = Object.fromEntries([...motionFields.querySelectorAll('input')].map((input) => [input.name, input.value]));
+    const response = await fetch('/api/motions/render', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedMotion.id, variables }),
+    });
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || 'Não foi possível renderizar o modelo.');
+    }
+    const blob = await response.blob();
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${selectedMotion.id}.mp4`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    notify('Motion renderizado localmente em MP4.');
+  } catch (error) {
+    notify(error.message || 'Falha na renderização local.');
+  } finally {
+    renderingMotion = false;
+    renderMotionButton.disabled = false;
+    renderMotionButton.innerHTML = '<span aria-hidden="true">▶</span> Renderizar modelo';
+  }
+}
+
 videoInput.addEventListener('change', (event) => loadVideo(event.target.files[0]));
 dropZone.addEventListener('dragover', (event) => { event.preventDefault(); dropZone.classList.add('is-dragging'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('is-dragging'));
@@ -261,6 +346,8 @@ video.addEventListener('timeupdate', updateTimeline);
 video.addEventListener('seeked', updateTimeline);
 analyzeButton.addEventListener('click', analyzeVideo);
 exportButton.addEventListener('click', exportSelection);
+renderMotionButton.addEventListener('click', renderMotion);
+loadMotions();
 
 fetch('/api/status').then((response) => response.json()).then((status) => {
   if (status.configured) {
