@@ -11,6 +11,7 @@
     "@google/genai": "^2.26.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "gsap": "^3.15.0",
     "hyperframes": "^0.8.111",
     "multer": "^2.4.0"
   }
