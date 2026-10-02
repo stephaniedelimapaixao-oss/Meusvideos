@@ -15,6 +15,7 @@ const timelinePlayhead = document.querySelector('#timeline-playhead');
 const toast = document.querySelector('#toast');
 
 let videoUrl = null;
+let videoFile = null;
 let duration = 0;
 let analysis = null;
 let activeSegment = -1;
@@ -60,6 +61,7 @@ function loadVideo(file) {
     notify('Escolha um arquivo de vídeo válido.');
     return;
   }
+  videoFile = file;
   if (videoUrl) URL.revokeObjectURL(videoUrl);
   videoUrl = URL.createObjectURL(file);
   video.src = videoUrl;
@@ -94,35 +96,6 @@ function loadVideo(file) {
   videoInput.value = '';
 }
 
-async function captureFrames() {
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  const count = Math.min(8, Math.max(3, Math.ceil(duration / 20)));
-  const times = Array.from({ length: count }, (_, index) => duration * ((index + 0.5) / count));
-  const previousTime = video.currentTime;
-  const wasPlaying = !video.paused;
-  video.pause();
-  canvas.width = Math.min(960, video.videoWidth);
-  canvas.height = Math.round(canvas.width * video.videoHeight / video.videoWidth);
-  const frames = [];
-
-  for (const time of times) {
-    if (Math.abs(video.currentTime - time) > 0.05) {
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Tempo esgotado ao ler o vídeo.')), 5000);
-        video.addEventListener('seeked', () => { clearTimeout(timeout); resolve(); }, { once: true });
-        video.currentTime = time;
-      });
-    }
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    frames.push({ time, image: canvas.toDataURL('image/jpeg', 0.72) });
-  }
-
-  video.currentTime = previousTime;
-  if (wasPlaying) await video.play().catch(() => {});
-  return frames;
-}
-
 function renderAnalysis(plan) {
   analysis = plan;
   document.querySelector('#result-title').textContent = plan.title || 'Sugestão de edição';
@@ -155,14 +128,15 @@ async function analyzeVideo() {
   if (!videoUrl || !duration) return;
   analyzeButton.disabled = true;
   document.querySelector('#analysis-error').hidden = true;
-  analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Lendo os quadros…';
+  analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Enviando vídeo…';
   try {
-    const frames = await captureFrames();
-    analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Pensando na edição…';
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('duration', String(duration));
+    formData.append('direction', document.querySelector('#direction-input').value);
     const response = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ duration, frames, direction: document.querySelector('#direction-input').value }),
+      body: formData,
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Não foi possível analisar o vídeo.');
@@ -173,7 +147,7 @@ async function analyzeVideo() {
     errorElement.hidden = false;
   } finally {
     analyzeButton.disabled = !videoUrl;
-    analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Analisar com Claude <span class="button-arrow" aria-hidden="true">↗</span>';
+    analyzeButton.innerHTML = '<span class="sparkle" aria-hidden="true">✳</span> Analisar com Gemini <span class="button-arrow" aria-hidden="true">↗</span>';
   }
 }
 
@@ -255,6 +229,7 @@ dropZone.addEventListener('drop', (event) => {
 document.querySelector('#remove-video').addEventListener('click', () => {
   if (videoUrl) URL.revokeObjectURL(videoUrl);
   videoUrl = null;
+  videoFile = null;
   duration = 0;
   video.pause();
   video.removeAttribute('src');
@@ -290,7 +265,7 @@ exportButton.addEventListener('click', exportSelection);
 fetch('/api/status').then((response) => response.json()).then((status) => {
   if (status.configured) {
     connectionStatus.classList.add('is-ready');
-    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Claude conectado</span>';
+    connectionStatus.innerHTML = '<span class="status-dot"></span><span>Gemini conectado</span>';
   } else {
     connectionStatus.classList.add('is-offline');
     connectionStatus.innerHTML = '<span class="status-dot"></span><span>Configure a API</span>';

@@ -30,7 +30,7 @@
         <label id="drop-zone" class="drop-zone" for="video-input">
           <span class="upload-icon" aria-hidden="true">↑</span>
           <span class="drop-title">Escolha seu vídeo</span>
-          <span class="drop-hint">MP4, MOV ou WebM · permanece no seu dispositivo</span>
+          <span class="drop-hint">MP4, MOV ou WebM · até 200 MB</span>
           <input id="video-input" type="file" accept="video/*">
         </label>
         <div class="source-file" id="source-file" hidden>
@@ -38,7 +38,7 @@
           <span class="file-details"><strong id="file-name">Nenhum arquivo</strong><small id="file-meta">—</small></span>
           <button id="remove-video" class="icon-button" aria-label="Remover vídeo" title="Remover vídeo">×</button>
         </div>
-        <div class="source-note"><span class="note-mark">i</span><p>O arquivo não é enviado. O Claude recebe até 8 quadros para analisar a cena.</p></div>
+        <div class="source-note"><span class="note-mark">i</span><p>O vídeo completo, incluindo o áudio, será enviado ao Google Gemini para análise.</p></div>
         <div class="source-footer"><span>ARQUIVO DE ORIGEM</span><span id="source-duration">00:00</span></div>
       </aside>
 
