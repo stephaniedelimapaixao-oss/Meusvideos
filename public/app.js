@@ -250,46 +250,46 @@ function waitForSeek(time) {
   });
 }
 
-function drawNewsFrame(context, width, height, currentTime) {
-  if (!newsClip || currentTime < newsClip.start || currentTime >= newsClip.start + newsClip.duration) return;
-  const progress = Math.max(0, Math.min(1, (currentTime - newsClip.start) / 0.62));
-  const eased = 1 - Math.pow(1 - progress, 3);
-  const cardWidth = width * 0.82;
-  const cardHeight = height * 0.82;
-  const scale = 0.9 + eased * 0.1;
-  const cardX = (width - cardWidth * scale) / 2;
-  const cardY = (height - cardHeight * scale) / 2 + (1 - eased) * height * 0.08;
-  const headerHeight = height * 0.045;
-  const padding = width * 0.012;
-  context.save();
-  context.globalAlpha = eased;
-  context.fillStyle = '#111914';
-  context.fillRect(cardX, cardY, cardWidth * scale, cardHeight * scale);
-  context.fillStyle = '#c4e879';
-  context.fillRect(cardX, cardY, cardWidth * scale, Math.max(4, height * 0.005));
-  context.fillStyle = '#171f19';
-  context.fillRect(cardX, cardY + height * 0.005, cardWidth * scale, headerHeight);
-  context.fillStyle = '#c4e879';
-  context.font = `600 ${Math.max(11, Math.round(height * 0.017))}px Arial`;
-  context.fillText('NOTÍCIA', cardX + padding, cardY + headerHeight * 0.68);
-  context.fillStyle = '#cad2c7';
-  context.font = `${Math.max(10, Math.round(height * 0.014))}px Arial`;
-  context.fillText(newsClip.hostname, cardX + padding + width * 0.075, cardY + headerHeight * 0.68);
-  const availableWidth = cardWidth * scale - padding * 2;
-  const availableHeight = cardHeight * scale - headerHeight - padding * 2;
-  const imageScale = Math.min(availableWidth / newsClip.image.naturalWidth, availableHeight / newsClip.image.naturalHeight);
-  const imageWidth = newsClip.image.naturalWidth * imageScale;
-  const imageHeight = newsClip.image.naturalHeight * imageScale;
-  const imageX = cardX + (cardWidth * scale - imageWidth) / 2;
-  const imageY = cardY + headerHeight + (availableHeight - imageHeight) / 2;
-  context.drawImage(newsClip.image, imageX, imageY, imageWidth, imageHeight);
-  context.restore();
+async function exportNewsSelection(start, end) {
+  exportButton.disabled = true;
+  exportButton.textContent = 'Compondo notícia…';
+  try {
+    const formData = new FormData();
+    formData.append('video', videoFile);
+    formData.append('captureId', newsClip.id);
+    formData.append('start', String(start));
+    formData.append('end', String(end));
+    formData.append('newsStart', String(newsClip.start));
+    formData.append('newsDuration', String(newsClip.duration));
+    const response = await fetch('/api/news/render', { method: 'POST', body: formData });
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || 'Não foi possível compor a notícia no vídeo.');
+    }
+    const blob = await response.blob();
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `${(analysis?.title || 'meusvideos').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.mp4`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    notify('Vídeo com notícia renderizado localmente em MP4.');
+  } catch (error) {
+    notify(error.message || 'Falha ao compor a notícia no vídeo.');
+  } finally {
+    exportButton.innerHTML = '<span aria-hidden="true">↓</span> Exportar trecho';
+    updateTimeline();
+  }
 }
 
 async function exportSelection() {
   const start = Number(startInput.value);
   const end = Number(endInput.value);
-  if (!video.captureStream || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+  if (newsClip && newsClip.start < end && newsClip.start + newsClip.duration > start) {
+    await exportNewsSelection(start, end);
+    return;
+  }
+  if (!video.captureStream || !window.MediaRecorder) {
     notify('A exportação de vídeo exige um navegador Chromium atualizado.');
     return;
   }
@@ -298,37 +298,16 @@ async function exportSelection() {
   try {
     video.pause();
     await waitForSeek(start);
-    const sourceStream = video.captureStream();
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const context = canvas.getContext('2d');
-    const stream = canvas.captureStream(30);
-    sourceStream.getAudioTracks().forEach((track) => stream.addTrack(track));
+    const stream = video.captureStream();
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
     const recorder = new MediaRecorder(stream, { mimeType });
     const chunks = [];
-    let drawing = true;
-    const drawFrame = () => {
-      if (!drawing) return;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      drawNewsFrame(context, canvas.width, canvas.height, video.currentTime);
-      if (recorder.state !== 'inactive') requestAnimationFrame(drawFrame);
-    };
     const finished = new Promise((resolve, reject) => {
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onerror = () => reject(new Error('Falha ao gravar o trecho.'));
-      recorder.onstop = () => {
-        drawing = false;
-        sourceStream.getTracks().forEach((track) => track.stop());
-        stream.getTracks().forEach((track) => track.stop());
-        resolve(new Blob(chunks, { type: mimeType }));
-      };
+      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
     });
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    drawNewsFrame(context, canvas.width, canvas.height, video.currentTime);
     recorder.start();
-    requestAnimationFrame(drawFrame);
     await video.play();
     await new Promise((resolve, reject) => {
       const checkEnd = () => {
