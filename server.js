@@ -1,11 +1,13 @@
 import { GoogleGenAI } from '@google/genai';
 import { chromium as playwright } from 'playwright-core';
+import { rateLimit } from 'express-rate-limit';
 import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import chromium from '@sparticuz/chromium';
 import { access, chmod, mkdir, mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { timingSafeEqual } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
@@ -19,6 +21,13 @@ dotenv.config();
 const app = express();
 const port = Number(process.env.PORT || 3000);
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const appPassword = process.env.APP_PASSWORD;
+const maxUploadBytes = 200 * 1024 * 1024;
+const requestsPerMinute = Number(process.env.RATE_LIMIT_PER_MINUTE || 60);
+if (!appPassword) throw new Error('Configure APP_PASSWORD antes de iniciar o servidor.');
+if (!Number.isSafeInteger(requestsPerMinute) || requestsPerMinute < 1) {
+  throw new Error('RATE_LIMIT_PER_MINUTE deve ser um número inteiro positivo.');
+}
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const publicDirectory = path.join(projectDirectory, 'public');
 const newsDirectory = path.join(publicDirectory, 'news');
@@ -63,9 +72,30 @@ let newsCaptureActive = false;
 let videoRenderActive = false;
 const upload = multer({
   dest: tmpdir(),
-  limits: { fileSize: 200 * 1024 * 1024 },
+  limits: { fileSize: maxUploadBytes, files: 1, fields: 8, fieldSize: 20 * 1024, parts: 9 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype.startsWith('video/')),
 });
+
+function requirePassword(request, response, next) {
+  const authorization = request.get('authorization') || '';
+  const [scheme, encodedCredentials] = authorization.split(' ', 2);
+  if (scheme?.toLowerCase() === 'basic' && encodedCredentials) {
+    const credentials = Buffer.from(encodedCredentials, 'base64').toString('utf8');
+    const separator = credentials.indexOf(':');
+    const candidate = Buffer.from(separator < 0 ? '' : credentials.slice(separator + 1));
+    const expected = Buffer.from(appPassword);
+    if (candidate.length === expected.length && timingSafeEqual(candidate, expected)) return next();
+  }
+
+  response.set('WWW-Authenticate', 'Basic realm="Meusvídeos", charset="UTF-8"');
+  return response.status(401).send('Autenticação necessária.');
+}
+
+async function browserExecutablePath() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH) return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
+  if (process.env.NODE_ENV === 'production') return playwright.executablePath();
+  return chromium.executablePath();
+}
 
 function isPublicAddress(address) {
   const version = isIP(address);
@@ -113,6 +143,15 @@ async function validatePublicUrl(value) {
   return url;
 }
 
+app.set('trust proxy', 1);
+app.use(rateLimit({
+  windowMs: 60_000,
+  limit: requestsPerMinute,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Limite de requisições atingido. Aguarde um minuto e tente novamente.' },
+}));
+app.use(requirePassword);
 app.use(express.static(publicDirectory));
 app.use(express.json({ limit: '20kb' }));
 
@@ -139,7 +178,7 @@ app.post('/api/motions/render', async (request, response) => {
     motionRenderActive = true;
     await chmod(ffmpegBinary, 0o755);
     await chmod(ffprobeBinary, 0o755);
-    const browserPath = await chromium.executablePath();
+    const browserPath = await browserExecutablePath();
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [
         hyperframesCli, 'render', projectDirectory,
@@ -197,8 +236,12 @@ app.post('/api/news/capture', async (request, response) => {
   let browser;
   let screenshotPath;
   try {
-    const browserPath = await chromium.executablePath();
-    browser = await playwright.launch({ executablePath: browserPath, args: chromium.args, headless: true });
+    const browserPath = await browserExecutablePath();
+    browser = await playwright.launch({
+      executablePath: browserPath,
+      args: process.env.NODE_ENV === 'production' ? undefined : chromium.args,
+      headless: true,
+    });
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
     page.setDefaultNavigationTimeout(20000);
     await page.route('**/*', async (route) => {
@@ -416,7 +459,7 @@ app.post('/api/analyze', upload.single('video'), async (request, response) => {
 
 app.use((error, _request, response, _next) => {
   if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
-    return response.status(413).json({ error: 'O vídeo excede o limite local de 200 MB.' });
+    return response.status(413).json({ error: `O vídeo excede o limite de ${maxUploadBytes / (1024 * 1024)} MB.` });
   }
   console.error('Falha ao receber o vídeo:', error.message);
   return response.status(400).json({ error: 'Não foi possível receber o arquivo de vídeo.' });
