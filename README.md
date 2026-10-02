@@ -1,9 +1,3 @@
----
-title: Meus Vídeos
-sdk: docker
-app_port: 7860
----
-
 # Meusvídeos
 
 Editor de vídeo local com análise do Gemini e quatro modelos de animação renderizados pelo HyperFrames. O vídeo completo, incluindo o áudio, é enviado à API do Google para obter sugestões de trechos, título e roteiro. O arquivo temporário local e o arquivo remoto de análise são removidos após o processamento. É possível ajustar entrada e saída e exportar o trecho selecionado em MP4.
@@ -24,16 +18,11 @@ O navegador solicitará usuário e senha via autenticação HTTP Basic; o nome d
 
 Uploads de vídeo são limitados a 200 MB por arquivo e o servidor aceita até 60 requisições por minuto por IP. O limite de requisições pode ser ajustado com `RATE_LIMIT_PER_MINUTE`.
 
-## Publicar no Hugging Face Spaces
+## Publicar no Google Cloud Run
 
-1. Crie um Space e escolha o SDK **Docker**. Envie os arquivos deste projeto para o repositório do Space.
-2. Em **Settings → Variables and secrets**, crie estes dois itens como **Secrets**:
-	- `GEMINI_API_KEY`: chave criada no Google AI Studio.
-	- `APP_PASSWORD`: senha longa para acessar o editor.
-3. Aguarde o Space construir a imagem. O `Dockerfile` instala Node.js, FFmpeg e o Chromium do Playwright e usa a porta `7860`, padrão do Spaces; não é necessário configurar `PORT` manualmente.
-4. Abra a URL do Space. O navegador pedirá autenticação; use qualquer nome de usuário e informe o valor de `APP_PASSWORD` como senha.
+O projeto já inclui um `Dockerfile` com Node.js, FFmpeg e Chromium, então pode ser publicado como contêiner no Cloud Run sem reconstruir os motions do HyperFrames. Configure `GEMINI_API_KEY` e `APP_PASSWORD` como secrets do serviço; não coloque esses valores no repositório. O Cloud Run fornece uma URL HTTPS estável e injeta a variável `PORT` automaticamente. A página continua protegida pela senha `APP_PASSWORD`.
 
-Não coloque os valores dos Secrets no repositório, em arquivos rastreados ou no histórico Git. O `.gitignore` exclui arquivos `.env` e arquivos comuns de chaves; `.env.example` contém apenas valores de exemplo e permanece versionado. Os Spaces gratuitos podem suspender o aplicativo após um período sem uso; disponibilidade contínua pode exigir um plano/hardware que não suspenda o Space.
+O Cloud Run exige uma conta Google Cloud com faturamento habilitado; o custo depende do uso e da região. O Gemini continua sujeito à própria cota e cobrança, independentemente da hospedagem. Há também limites a considerar antes de usar com vídeos grandes: o endpoint atual aceita até 200 MB, mas requisições HTTP do Cloud Run têm limite de 32 MiB. Para manter uploads maiores, será necessário enviar o vídeo diretamente a um bucket do Cloud Storage e adaptar o servidor para processá-lo. Arquivos temporários e capturas de notícias ficam no disco efêmero da instância, não em armazenamento permanente.
 
 ## Limites desta versão
 

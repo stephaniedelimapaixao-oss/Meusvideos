@@ -1,7 +1,7 @@
 FROM node:22-bookworm
 
 ENV NODE_ENV=production \
-    PORT=7860
+    PORT=8080
 
 WORKDIR /app
 
@@ -15,5 +15,5 @@ RUN ./node_modules/.bin/playwright-core install --with-deps chromium
 
 COPY . .
 
-EXPOSE 7860
+EXPOSE 8080
 CMD ["npm", "start"]
