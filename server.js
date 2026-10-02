@@ -21,7 +21,7 @@ const ffmpegBinary = path.join(ffmpegDirectory, 'ffmpeg');
 const motionTemplates = [
   {
     id: 'titulo-animado', name: 'Título animado', description: 'Tipografia em foco com entrada ascendente e acento gráfico.', duration: 5,
-    file: 'titulo-animado.html', fields: [
+    file: '../index.html', fields: [
       { id: 'eyebrow', label: 'Chamada', placeholder: 'UMA IDEIA EM MOVIMENTO', default: 'UMA IDEIA EM MOVIMENTO', maxLength: 60 },
       { id: 'title', label: 'Título', placeholder: 'Sua mensagem', default: 'Sua mensagem', maxLength: 70 },
     ],
