@@ -1,10 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
+import { chromium as playwright } from 'playwright-core';
 import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
 import chromium from '@sparticuz/chromium';
 import { chmod, mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { lookup } from 'node:dns/promises';
+import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import path, { delimiter } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +20,7 @@ const port = Number(process.env.PORT || 3000);
 const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const publicDirectory = path.join(projectDirectory, 'public');
+const newsDirectory = path.join(publicDirectory, 'news');
 const hyperframesCli = path.join(projectDirectory, 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs');
 const ffmpegDirectory = path.join(projectDirectory, 'node_modules', '@ffmpeg-installer', 'linux-x64');
 const ffprobeDirectory = path.join(projectDirectory, 'node_modules', '@ffprobe-installer', 'linux-x64');
@@ -52,11 +57,58 @@ const motionTemplates = [
   },
 ];
 let motionRenderActive = false;
+let newsCaptureActive = false;
 const upload = multer({
   dest: tmpdir(),
   limits: { fileSize: 200 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype.startsWith('video/')),
 });
+
+function isPublicAddress(address) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [first, second, third] = address.split('.').map(Number);
+    return first !== 0 && first !== 10 && first !== 127 && first < 224
+      && !(first === 100 && second >= 64 && second <= 127)
+      && !(first === 169 && second === 254)
+      && !(first === 172 && second >= 16 && second <= 31)
+      && !(first === 192 && (second === 0 || second === 168))
+      && !(first === 198 && (second === 18 || second === 19 || (second === 51 && third === 100)))
+      && !(first === 203 && second === 0 && third === 113);
+  }
+  if (version === 6) {
+    const value = address.toLowerCase();
+    const firstGroup = Number.parseInt(value.split(':').find(Boolean) || '0', 16);
+    return value !== '::' && value !== '::1' && !value.startsWith('::ffff:')
+      && !value.startsWith('2001:db8:')
+      && (firstGroup & 0xfe00) !== 0xfc00
+      && (firstGroup & 0xffc0) !== 0xfe80
+      && (firstGroup & 0xff00) !== 0xff00;
+  }
+  return false;
+}
+
+async function validatePublicUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Cole um link válido de notícia.');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || (url.port && !['80', '443'].includes(url.port))) {
+    throw new Error('Use um link HTTP ou HTTPS público, sem portas personalizadas.');
+  }
+
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+    throw new Error('Links locais ou internos não podem ser capturados.');
+  }
+  const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true });
+  if (!addresses.length || addresses.some(({ address }) => !isPublicAddress(address))) {
+    throw new Error('O link precisa apontar apenas para endereços públicos.');
+  }
+  return url;
+}
 
 app.use(express.static(publicDirectory));
 app.use(express.json({ limit: '20kb' }));
@@ -127,6 +179,61 @@ app.post('/api/motions/render', async (request, response) => {
     await rm(renderDirectory, { recursive: true, force: true });
     return response.status(500).json({ error: 'A renderização local falhou. Verifique se o HyperFrames e o Chromium foram instalados.' });
   }
+});
+
+app.post('/api/news/capture', async (request, response) => {
+  if (newsCaptureActive) return response.status(409).json({ error: 'Uma página já está sendo capturada.' });
+  let pageUrl;
+  try {
+    pageUrl = await validatePublicUrl(request.body?.url);
+  } catch (error) {
+    return response.status(400).json({ error: error.message });
+  }
+
+  newsCaptureActive = true;
+  let browser;
+  let screenshotPath;
+  try {
+    const browserPath = await chromium.executablePath();
+    browser = await playwright.launch({ executablePath: browserPath, args: chromium.args, headless: true });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+    page.setDefaultNavigationTimeout(20000);
+    await page.route('**/*', async (route) => {
+      try {
+        const resourceUrl = new URL(route.request().url());
+        if (['data:', 'blob:', 'about:'].includes(resourceUrl.protocol)) return route.continue();
+        await validatePublicUrl(resourceUrl.href);
+        return route.continue();
+      } catch {
+        return route.abort('blockedbyclient');
+      }
+    });
+
+    const pageResponse = await page.goto(pageUrl.href, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    if (!pageResponse || !pageResponse.ok()) {
+      return response.status(422).json({ error: `A página respondeu com ${pageResponse?.status() || 'erro de navegação'}.` });
+    }
+    await page.waitForTimeout(900);
+    const title = (await page.title()).trim().slice(0, 160) || pageUrl.hostname;
+    const id = randomUUID();
+    await mkdir(newsDirectory, { recursive: true });
+    screenshotPath = path.join(newsDirectory, `${id}.png`);
+    await page.screenshot({ path: screenshotPath, type: 'png' });
+    return response.json({ id, title, hostname: pageUrl.hostname, url: pageUrl.href, imageUrl: `/news/${id}.png` });
+  } catch (error) {
+    console.error('Falha ao capturar a notícia:', error.message);
+    if (screenshotPath) await unlink(screenshotPath).catch(() => {});
+    return response.status(502).json({ error: 'Não foi possível capturar a página. Confira o link e tente novamente.' });
+  } finally {
+    await browser?.close().catch(() => {});
+    newsCaptureActive = false;
+  }
+});
+
+app.delete('/api/news/:id', async (request, response) => {
+  if (!/^[\da-f-]{36}$/i.test(request.params.id)) return response.status(400).json({ error: 'Identificador inválido.' });
+  await unlink(path.join(newsDirectory, `${request.params.id}.png`)).catch(() => {});
+  return response.status(204).end();
 });
 
 app.get('/api/status', (_request, response) => {

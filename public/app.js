@@ -17,6 +17,14 @@ const motionGrid = document.querySelector('#motion-grid');
 const motionEditor = document.querySelector('#motion-editor');
 const motionFields = document.querySelector('#motion-fields');
 const renderMotionButton = document.querySelector('#render-motion-button');
+const insertNewsButton = document.querySelector('#insert-news-button');
+const newsDialog = document.querySelector('#news-dialog');
+const newsForm = document.querySelector('#news-form');
+const newsUrlInput = document.querySelector('#news-url');
+const newsImage = document.querySelector('#news-image');
+const newsOverlay = document.querySelector('#news-overlay');
+const removeNewsButton = document.querySelector('#remove-news-button');
+const captureNewsButton = document.querySelector('#capture-news-button');
 
 let videoUrl = null;
 let videoFile = null;
@@ -26,6 +34,9 @@ let activeSegment = -1;
 let toastTimer;
 let selectedMotion = null;
 let renderingMotion = false;
+let newsClip = null;
+let newsClipStart = 0;
+let newsOverlayActive = false;
 
 function formatTime(seconds, decimals = 0) {
   if (!Number.isFinite(seconds)) return '00:00';
@@ -60,6 +71,79 @@ function updateTimeline() {
   exportButton.disabled = !(videoUrl && end > start && end <= duration);
   document.querySelector('#set-in-button').disabled = !videoUrl;
   document.querySelector('#set-out-button').disabled = !videoUrl;
+  insertNewsButton.disabled = !videoUrl;
+  updateNewsPreview();
+}
+
+function updateNewsPreview() {
+  const active = Boolean(newsClip && video.currentTime >= newsClip.start && video.currentTime < newsClip.start + newsClip.duration);
+  removeNewsButton.hidden = !newsClip;
+  if (active === newsOverlayActive) return;
+  newsOverlayActive = active;
+  newsOverlay.hidden = !active;
+  newsOverlay.classList.remove('is-visible');
+  if (active) requestAnimationFrame(() => newsOverlay.classList.add('is-visible'));
+}
+
+async function deleteNewsCapture(id) {
+  await fetch(`/api/news/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+}
+
+function removeNews() {
+  if (!newsClip) return;
+  const { id } = newsClip;
+  newsClip = null;
+  newsOverlayActive = false;
+  newsOverlay.hidden = true;
+  removeNewsButton.hidden = true;
+  updateTimeline();
+  deleteNewsCapture(id);
+}
+
+function insertNews() {
+  if (!videoUrl) return;
+  video.pause();
+  newsClipStart = video.currentTime;
+  document.querySelector('#news-error').hidden = true;
+  newsUrlInput.value = '';
+  newsDialog.showModal();
+  newsUrlInput.focus();
+}
+
+async function captureNews(event) {
+  event.preventDefault();
+  captureNewsButton.disabled = true;
+  captureNewsButton.textContent = 'Capturando página…';
+  document.querySelector('#news-error').hidden = true;
+  try {
+    const response = await fetch('/api/news/capture', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: newsUrlInput.value.trim() }),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Não foi possível capturar a notícia.');
+    const image = new Image();
+    image.src = result.imageUrl;
+    await image.decode();
+    const previousCapture = newsClip?.id;
+    newsClip = { ...result, image, start: newsClipStart, duration: 4.5 };
+    newsImage.src = result.imageUrl;
+    newsImage.alt = `Captura da notícia: ${result.title}`;
+    document.querySelector('#news-hostname').textContent = result.hostname;
+    newsOverlayActive = false;
+    updateTimeline();
+    newsDialog.close();
+    if (previousCapture) deleteNewsCapture(previousCapture);
+    notify('Notícia inserida na linha do tempo.');
+  } catch (error) {
+    const errorElement = document.querySelector('#news-error');
+    errorElement.textContent = error.message || 'Falha ao capturar a página.';
+    errorElement.hidden = false;
+  } finally {
+    captureNewsButton.disabled = false;
+    captureNewsButton.textContent = 'Capturar página';
+  }
 }
 
 function loadVideo(file) {
@@ -165,10 +249,46 @@ function waitForSeek(time) {
   });
 }
 
+function drawNewsFrame(context, width, height, currentTime) {
+  if (!newsClip || currentTime < newsClip.start || currentTime >= newsClip.start + newsClip.duration) return;
+  const progress = Math.max(0, Math.min(1, (currentTime - newsClip.start) / 0.62));
+  const eased = 1 - Math.pow(1 - progress, 3);
+  const cardWidth = width * 0.82;
+  const cardHeight = height * 0.82;
+  const scale = 0.9 + eased * 0.1;
+  const cardX = (width - cardWidth * scale) / 2;
+  const cardY = (height - cardHeight * scale) / 2 + (1 - eased) * height * 0.08;
+  const headerHeight = height * 0.045;
+  const padding = width * 0.012;
+  context.save();
+  context.globalAlpha = eased;
+  context.fillStyle = '#111914';
+  context.fillRect(cardX, cardY, cardWidth * scale, cardHeight * scale);
+  context.fillStyle = '#c4e879';
+  context.fillRect(cardX, cardY, cardWidth * scale, Math.max(4, height * 0.005));
+  context.fillStyle = '#171f19';
+  context.fillRect(cardX, cardY + height * 0.005, cardWidth * scale, headerHeight);
+  context.fillStyle = '#c4e879';
+  context.font = `600 ${Math.max(11, Math.round(height * 0.017))}px Arial`;
+  context.fillText('NOTÍCIA', cardX + padding, cardY + headerHeight * 0.68);
+  context.fillStyle = '#cad2c7';
+  context.font = `${Math.max(10, Math.round(height * 0.014))}px Arial`;
+  context.fillText(newsClip.hostname, cardX + padding + width * 0.075, cardY + headerHeight * 0.68);
+  const availableWidth = cardWidth * scale - padding * 2;
+  const availableHeight = cardHeight * scale - headerHeight - padding * 2;
+  const imageScale = Math.min(availableWidth / newsClip.image.naturalWidth, availableHeight / newsClip.image.naturalHeight);
+  const imageWidth = newsClip.image.naturalWidth * imageScale;
+  const imageHeight = newsClip.image.naturalHeight * imageScale;
+  const imageX = cardX + (cardWidth * scale - imageWidth) / 2;
+  const imageY = cardY + headerHeight + (availableHeight - imageHeight) / 2;
+  context.drawImage(newsClip.image, imageX, imageY, imageWidth, imageHeight);
+  context.restore();
+}
+
 async function exportSelection() {
   const start = Number(startInput.value);
   const end = Number(endInput.value);
-  if (!video.captureStream || !window.MediaRecorder) {
+  if (!video.captureStream || !window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
     notify('A exportação de vídeo exige um navegador Chromium atualizado.');
     return;
   }
@@ -177,16 +297,37 @@ async function exportSelection() {
   try {
     video.pause();
     await waitForSeek(start);
-    const stream = video.captureStream();
+    const sourceStream = video.captureStream();
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    const stream = canvas.captureStream(30);
+    sourceStream.getAudioTracks().forEach((track) => stream.addTrack(track));
     const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
     const recorder = new MediaRecorder(stream, { mimeType });
     const chunks = [];
+    let drawing = true;
+    const drawFrame = () => {
+      if (!drawing) return;
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      drawNewsFrame(context, canvas.width, canvas.height, video.currentTime);
+      if (recorder.state !== 'inactive') requestAnimationFrame(drawFrame);
+    };
     const finished = new Promise((resolve, reject) => {
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
       recorder.onerror = () => reject(new Error('Falha ao gravar o trecho.'));
-      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+      recorder.onstop = () => {
+        drawing = false;
+        sourceStream.getTracks().forEach((track) => track.stop());
+        stream.getTracks().forEach((track) => track.stop());
+        resolve(new Blob(chunks, { type: mimeType }));
+      };
     });
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    drawNewsFrame(context, canvas.width, canvas.height, video.currentTime);
     recorder.start();
+    requestAnimationFrame(drawFrame);
     await video.play();
     await new Promise((resolve, reject) => {
       const checkEnd = () => {
@@ -342,10 +483,16 @@ document.querySelector('#set-in-button').addEventListener('click', () => setTrim
 document.querySelector('#set-out-button').addEventListener('click', () => setTrim(Number(startInput.value), video.currentTime));
 startInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
 endInput.addEventListener('change', () => setTrim(startInput.value, endInput.value));
-video.addEventListener('timeupdate', updateTimeline);
+  if (newsClip) removeNews();
+  video.addEventListener('timeupdate', updateTimeline);
 video.addEventListener('seeked', updateTimeline);
 analyzeButton.addEventListener('click', analyzeVideo);
 exportButton.addEventListener('click', exportSelection);
+insertNewsButton.addEventListener('click', insertNews);
+removeNewsButton.addEventListener('click', removeNews);
+newsForm.addEventListener('submit', captureNews);
+document.querySelector('#cancel-news').addEventListener('click', () => newsDialog.close());
+document.querySelector('#close-news-dialog').addEventListener('click', () => newsDialog.close());
 renderMotionButton.addEventListener('click', renderMotion);
 loadMotions();
 

@@ -47,6 +47,10 @@
         <div class="preview-stage" id="preview-stage">
           <div class="preview-empty" id="preview-empty"><span class="preview-glyph" aria-hidden="true">▶</span><p>Seu vídeo aparece aqui</p></div>
           <video id="video-preview" controls playsinline hidden></video>
+          <div id="news-overlay" class="news-overlay" hidden aria-live="polite">
+            <div class="news-card"><div class="news-card-header"><span class="news-kicker">NOTÍCIA</span><span id="news-hostname"></span></div><img id="news-image" alt="Captura da página de notícia"></div>
+          </div>
+          <button id="remove-news-button" class="icon-button news-remove" type="button" aria-label="Remover notícia da edição" title="Remover notícia" hidden>×</button>
           <div class="preview-label"><span class="live-dot"></span> PRÉVIA</div>
         </div>
 
@@ -66,6 +70,8 @@
             <span class="trim-duration" id="trim-duration">0 s selecionados</span>
           </div>
         </div>
+
+        <div class="news-tools"><span class="eyebrow">03 / NOTÍCIA</span><button id="insert-news-button" class="button button-small" type="button" disabled><span aria-hidden="true">↗</span> Inserir notícia</button></div>
 
         <section class="motion-library" aria-labelledby="motion-heading">
           <div class="motion-heading"><span id="motion-heading" class="eyebrow">04 / MOTION</span><span class="panel-count">RENDER LOCAL</span></div>
@@ -95,6 +101,17 @@
         <div id="assistant-hint" class="assistant-hint"><span aria-hidden="true">↖</span> Adicione um vídeo para começar a conversa.</div>
       </aside>
     </main>
+    <dialog id="news-dialog" class="news-dialog">
+      <form id="news-form">
+        <div class="dialog-heading"><span class="eyebrow">CAPTURA LOCAL</span><button id="close-news-dialog" class="icon-button" type="button" aria-label="Fechar">×</button></div>
+        <h2>Inserir notícia</h2>
+        <p>A página pública será capturada e entrará neste ponto da edição.</p>
+        <label for="news-url">LINK DA NOTÍCIA</label>
+        <input id="news-url" name="url" type="url" placeholder="https://exemplo.com/noticia" required autocomplete="url">
+        <p id="news-error" class="inline-error" role="alert" hidden></p>
+        <div class="dialog-actions"><button id="cancel-news" class="button button-small" type="button">Cancelar</button><button id="capture-news-button" class="button button-render" type="submit">Capturar página</button></div>
+      </form>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

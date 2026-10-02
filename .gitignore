@@ -3,3 +3,4 @@ node_modules/
 *.log
 renders/
 .hyperframes/
+public/news/
