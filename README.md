@@ -1,3 +1,9 @@
+---
+title: Meus Vídeos
+sdk: docker
+app_port: 7860
+---
+
 # Meusvídeos
 
 Editor de vídeo local com análise do Gemini e quatro modelos de animação renderizados pelo HyperFrames. O vídeo completo, incluindo o áudio, é enviado à API do Google para obter sugestões de trechos, título e roteiro. O arquivo temporário local e o arquivo remoto de análise são removidos após o processamento. É possível ajustar entrada e saída e exportar o trecho selecionado em MP4.
