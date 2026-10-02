@@ -7,9 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@ffmpeg-installer/linux-x64": "^4.1.0",
     "@google/genai": "^2.26.0",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "hyperframes": "^0.8.111",
     "multer": "^2.4.0"
   }
 }
