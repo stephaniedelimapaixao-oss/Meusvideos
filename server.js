@@ -37,7 +37,7 @@ const motionTemplates = [
     ],
   },
   {
-    id: 'lower-third', name: 'Lower third', description: 'Identificação elegante para entrevistas e vídeos de apresentação.', duration: 6,
+    id: 'lower-third', name: 'Faixa de identificação', description: 'Identificação elegante para entrevistas e vídeos de apresentação.', duration: 6,
     file: 'lower-third.html', fields: [
       { id: 'name', label: 'Nome', placeholder: 'Nome da pessoa', default: 'Marina Costa', maxLength: 60 },
       { id: 'role', label: 'Identificação', placeholder: 'Cargo ou contexto', default: 'Diretora criativa', maxLength: 80 },

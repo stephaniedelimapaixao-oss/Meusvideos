@@ -414,7 +414,7 @@ async function renderMotion() {
     link.download = `${selectedMotion.id}.mp4`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-    notify('Motion renderizado localmente em MP4.');
+    notify('Animação renderizada localmente em MP4.');
   } catch (error) {
     notify(error.message || 'Falha na renderização local.');
   } finally {
