@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import express from 'express';
 import multer from 'multer';
+import chromium from '@sparticuz/chromium';
 import { chmod, mkdtemp, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path, { delimiter } from 'node:path';
@@ -17,7 +18,9 @@ const projectDirectory = path.dirname(fileURLToPath(import.meta.url));
 const publicDirectory = path.join(projectDirectory, 'public');
 const hyperframesCli = path.join(projectDirectory, 'node_modules', 'hyperframes', 'bin', 'hyperframes.mjs');
 const ffmpegDirectory = path.join(projectDirectory, 'node_modules', '@ffmpeg-installer', 'linux-x64');
+const ffprobeDirectory = path.join(projectDirectory, 'node_modules', '@ffprobe-installer', 'linux-x64');
 const ffmpegBinary = path.join(ffmpegDirectory, 'ffmpeg');
+const ffprobeBinary = path.join(ffprobeDirectory, 'ffprobe');
 const motionTemplates = [
   {
     id: 'titulo-animado', name: 'Título animado', description: 'Tipografia em foco com entrada ascendente e acento gráfico.', duration: 5,
@@ -48,6 +51,7 @@ const motionTemplates = [
     ],
   },
 ];
+let motionRenderActive = false;
 const upload = multer({
   dest: tmpdir(),
   limits: { fileSize: 200 * 1024 * 1024 },
@@ -62,6 +66,7 @@ app.get('/api/motions', (_request, response) => {
 });
 
 app.post('/api/motions/render', async (request, response) => {
+  if (motionRenderActive) return response.status(409).json({ error: 'Já existe um motion sendo renderizado.' });
   const template = motionTemplates.find((item) => item.id === request.body?.id);
   if (!template) return response.status(400).json({ error: 'Escolha um modelo de motion válido.' });
   if (request.body?.variables === null || typeof request.body.variables !== 'object' || Array.isArray(request.body.variables)) {
@@ -76,7 +81,10 @@ app.post('/api/motions/render', async (request, response) => {
   const outputFile = path.join(renderDirectory, `${template.id}.mp4`);
 
   try {
+    motionRenderActive = true;
     await chmod(ffmpegBinary, 0o755);
+    await chmod(ffprobeBinary, 0o755);
+    const browserPath = await chromium.executablePath();
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [
         hyperframesCli, 'render', projectDirectory,
@@ -86,7 +94,13 @@ app.post('/api/motions/render', async (request, response) => {
         '--variables', JSON.stringify(variables), '--strict',
       ], {
         cwd: projectDirectory,
-        env: { ...process.env, PATH: `${ffmpegDirectory}${delimiter}${process.env.PATH || ''}` },
+        env: {
+          ...process.env,
+          PATH: `${ffmpegDirectory}${delimiter}${ffprobeDirectory}${delimiter}${process.env.PATH || ''}`,
+          HYPERFRAMES_FFMPEG_PATH: ffmpegBinary,
+          HYPERFRAMES_FFPROBE_PATH: ffprobeBinary,
+          HYPERFRAMES_BROWSER_PATH: browserPath,
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let logs = '';
@@ -102,11 +116,13 @@ app.post('/api/motions/render', async (request, response) => {
       });
     });
 
+    motionRenderActive = false;
     response.download(outputFile, `${template.id}.mp4`, async (error) => {
       await rm(renderDirectory, { recursive: true, force: true });
       if (error && !response.headersSent) response.status(500).json({ error: 'Não foi possível enviar o vídeo renderizado.' });
     });
   } catch (error) {
+    motionRenderActive = false;
     console.error('Falha no render HyperFrames:', error.message);
     await rm(renderDirectory, { recursive: true, force: true });
     return response.status(500).json({ error: 'A renderização local falhou. Verifique se o HyperFrames e o Chromium foram instalados.' });
