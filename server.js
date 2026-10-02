@@ -60,7 +60,7 @@ const motionTemplates = [
 ];
 let motionRenderActive = false;
 let newsCaptureActive = false;
-let newsRenderActive = false;
+let videoRenderActive = false;
 const upload = multer({
   dest: tmpdir(),
   limits: { fileSize: 200 * 1024 * 1024 },
@@ -239,62 +239,71 @@ app.delete('/api/news/:id', async (request, response) => {
   return response.status(204).end();
 });
 
-app.post('/api/news/render', upload.single('video'), async (request, response) => {
-  if (newsRenderActive) {
+app.post('/api/video/render', upload.single('video'), async (request, response) => {
+  if (videoRenderActive) {
     if (request.file?.path) await unlink(request.file.path).catch(() => {});
     return response.status(409).json({ error: 'Já existe um vídeo sendo renderizado.' });
   }
 
-  const { captureId } = request.body ?? {};
-  if (!request.file || !/^[\da-f-]{36}$/i.test(captureId || '')) {
+  const captureId = request.body?.captureId;
+  const hasNews = typeof captureId === 'string' && captureId.length > 0;
+  if (!request.file || (hasNews && !/^[\da-f-]{36}$/i.test(captureId))) {
     if (request.file?.path) await unlink(request.file.path).catch(() => {});
-    return response.status(400).json({ error: 'Envie um vídeo e uma captura de notícia válida.' });
+    return response.status(400).json({ error: 'Envie um vídeo e, se houver, uma captura de notícia válida.' });
   }
-  const screenshotPath = path.join(newsDirectory, `${captureId}.png`);
+  const screenshotPath = hasNews ? path.join(newsDirectory, `${captureId}.png`) : null;
   const trimStart = Number(request.body.start);
   const trimEnd = Number(request.body.end);
-  const newsStart = Number(request.body.newsStart);
-  const newsDuration = Number(request.body.newsDuration);
+  const newsStart = hasNews ? Number(request.body.newsStart) : 0;
+  const newsDuration = hasNews ? Number(request.body.newsDuration) : 0;
   const clipDuration = trimEnd - trimStart;
-  if (![trimStart, trimEnd, newsStart, newsDuration].every(Number.isFinite) || trimStart < 0 || clipDuration <= 0 || clipDuration > 300 || newsStart < 0 || newsDuration <= 0) {
+  if (![trimStart, trimEnd].every(Number.isFinite) || trimStart < 0 || clipDuration <= 0 || clipDuration > 300
+    || (hasNews && (![newsStart, newsDuration].every(Number.isFinite) || newsStart < 0 || newsDuration <= 0))) {
     await unlink(request.file.path).catch(() => {});
     return response.status(400).json({ error: 'Os tempos de corte ou da notícia são inválidos.' });
   }
-  try {
-    await access(screenshotPath);
-  } catch {
-    await unlink(request.file.path).catch(() => {});
-    return response.status(404).json({ error: 'A captura da notícia não está mais disponível.' });
+  if (hasNews) {
+    try {
+      await access(screenshotPath);
+    } catch {
+      await unlink(request.file.path).catch(() => {});
+      return response.status(404).json({ error: 'A captura da notícia não está mais disponível.' });
+    }
   }
 
   const renderDirectory = await mkdtemp(path.join(tmpdir(), 'meusvideos-news-render-'));
   const outputFile = path.join(renderDirectory, 'meusvideos-noticia.mp4');
-  newsRenderActive = true;
+  videoRenderActive = true;
   try {
     await chmod(ffmpegBinary, 0o755);
-    await chmod(ffprobeBinary, 0o755);
-    const { stdout } = await execFileAsync(ffprobeBinary, [
-      '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', request.file.path,
-    ], { timeout: 10000, maxBuffer: 4096 });
-    const [videoWidth, videoHeight] = stdout.trim().split('x').map(Number);
-    if (!Number.isFinite(videoWidth) || !Number.isFinite(videoHeight)) throw new Error('Não foi possível ler as dimensões do vídeo.');
+    const ffmpegArguments = [
+      '-hide_banner', '-loglevel', 'error', '-y', '-ss', trimStart.toFixed(3), '-i', request.file.path,
+    ];
+    if (hasNews) {
+      await chmod(ffprobeBinary, 0o755);
+      const { stdout } = await execFileAsync(ffprobeBinary, [
+        '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=s=x:p=0', request.file.path,
+      ], { timeout: 10000, maxBuffer: 4096 });
+      const [videoWidth, videoHeight] = stdout.trim().split('x').map(Number);
+      if (!Number.isFinite(videoWidth) || !Number.isFinite(videoHeight)) throw new Error('Não foi possível ler as dimensões do vídeo.');
 
-    const cardWidth = Math.max(2, Math.floor(videoWidth * 0.82 / 2) * 2);
-    const cardHeight = Math.max(2, Math.floor(videoHeight * 0.72 / 2) * 2);
-    const imageWidth = Math.max(2, cardWidth - Math.floor(videoWidth * 0.035 / 2) * 2);
-    const imageHeight = Math.max(2, cardHeight - Math.floor(videoHeight * 0.08 / 2) * 2);
-    const overlayStart = Math.max(0, newsStart - trimStart);
-    const overlayEnd = Math.min(clipDuration, overlayStart + newsDuration);
-    const entrance = `(1-min(max((t-${overlayStart.toFixed(3)})/0.62,0),1))`;
-    const filter = `[0:v]setpts=PTS-STARTPTS[base];[1:v]scale=${imageWidth}:${imageHeight}:force_original_aspect_ratio=decrease,pad=${cardWidth}:${cardHeight}:(ow-iw)/2:(oh-ih)/2:color=0x111914,format=rgba,fade=t=in:st=0:d=0.62:alpha=1[card];[base][card]overlay=x='(W-w)/2':y='(H-h)/2+${entrance}*H*0.08':eval=frame:enable='between(t,${overlayStart.toFixed(3)},${overlayEnd.toFixed(3)})'[outv]`;
+      const cardWidth = Math.max(2, Math.floor(videoWidth * 0.82 / 2) * 2);
+      const cardHeight = Math.max(2, Math.floor(videoHeight * 0.72 / 2) * 2);
+      const imageWidth = Math.max(2, cardWidth - Math.floor(videoWidth * 0.035 / 2) * 2);
+      const imageHeight = Math.max(2, cardHeight - Math.floor(videoHeight * 0.08 / 2) * 2);
+      const overlayStart = Math.max(0, newsStart - trimStart);
+      const overlayEnd = Math.min(clipDuration, overlayStart + newsDuration);
+      if (overlayEnd <= overlayStart) throw new Error('A captura da notícia está fora do trecho selecionado.');
+      const entrance = `(1-min(max((t-${overlayStart.toFixed(3)})/0.62,0),1))`;
+      const filter = `[0:v]setpts=PTS-STARTPTS[base];[1:v]scale=${imageWidth}:${imageHeight}:force_original_aspect_ratio=decrease,pad=${cardWidth}:${cardHeight}:(ow-iw)/2:(oh-ih)/2:color=0x111914,format=rgba,fade=t=in:st=0:d=0.62:alpha=1[card];[base][card]overlay=x='(W-w)/2':y='(H-h)/2+${entrance}*H*0.08':eval=frame:enable='between(t,${overlayStart.toFixed(3)},${overlayEnd.toFixed(3)})'[outv]`;
+      ffmpegArguments.push('-loop', '1', '-framerate', '30', '-i', screenshotPath, '-filter_complex', filter, '-map', '[outv]');
+    } else {
+      ffmpegArguments.push('-map', '0:v:0');
+    }
+    ffmpegArguments.push('-map', '0:a?', '-t', clipDuration.toFixed(3), '-r', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outputFile);
+
     await new Promise((resolve, reject) => {
-      const child = spawn(ffmpegBinary, [
-        '-hide_banner', '-loglevel', 'error', '-y', '-ss', trimStart.toFixed(3), '-i', request.file.path,
-        '-loop', '1', '-framerate', '30', '-i', screenshotPath,
-        '-filter_complex', filter, '-map', '[outv]', '-map', '0:a?', '-t', clipDuration.toFixed(3),
-        '-r', '30', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', outputFile,
-      ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      const child = spawn(ffmpegBinary, ffmpegArguments, { stdio: ['ignore', 'ignore', 'pipe'] });
       let logs = '';
       child.stderr.on('data', (chunk) => { logs = `${logs}${chunk}`.slice(-6000); });
       const timeout = setTimeout(() => child.kill('SIGTERM'), Math.max(60000, clipDuration * 10000));
@@ -306,15 +315,15 @@ app.post('/api/news/render', upload.single('video'), async (request, response) =
       });
     });
 
-    newsRenderActive = false;
-    response.download(outputFile, 'meusvideos-noticia.mp4', async (error) => {
+    videoRenderActive = false;
+    response.download(outputFile, 'meusvideos.mp4', async (error) => {
       await rm(renderDirectory, { recursive: true, force: true });
       await unlink(request.file.path).catch(() => {});
       if (error && !response.headersSent) response.status(500).json({ error: 'Não foi possível enviar o vídeo renderizado.' });
     });
   } catch (error) {
-    newsRenderActive = false;
-    console.error('Falha ao compor a notícia no vídeo:', error.message);
+    videoRenderActive = false;
+    console.error('Falha ao exportar o vídeo:', error.message);
     await rm(renderDirectory, { recursive: true, force: true });
     await unlink(request.file.path).catch(() => {});
     return response.status(500).json({ error: 'Não foi possível compor o vídeo localmente.' });

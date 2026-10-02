@@ -242,26 +242,24 @@ async function analyzeVideo() {
   }
 }
 
-function waitForSeek(time) {
-  if (Math.abs(video.currentTime - time) < 0.05) return Promise.resolve();
-  return new Promise((resolve) => {
-    video.addEventListener('seeked', resolve, { once: true });
-    video.currentTime = time;
-  });
-}
-
-async function exportNewsSelection(start, end) {
+async function exportSelection() {
+  const start = Number(startInput.value);
+  const end = Number(endInput.value);
+  const includeNews = Boolean(newsClip && newsClip.start < end && newsClip.start + newsClip.duration > start);
+  if (!videoFile || end <= start) return;
   exportButton.disabled = true;
-  exportButton.textContent = 'Compondo notícia…';
+  exportButton.textContent = includeNews ? 'Compondo notícia…' : 'Exportando trecho…';
   try {
     const formData = new FormData();
     formData.append('video', videoFile);
-    formData.append('captureId', newsClip.id);
     formData.append('start', String(start));
     formData.append('end', String(end));
-    formData.append('newsStart', String(newsClip.start));
-    formData.append('newsDuration', String(newsClip.duration));
-    const response = await fetch('/api/news/render', { method: 'POST', body: formData });
+    if (includeNews) {
+      formData.append('captureId', newsClip.id);
+      formData.append('newsStart', String(newsClip.start));
+      formData.append('newsDuration', String(newsClip.duration));
+    }
+    const response = await fetch('/api/video/render', { method: 'POST', body: formData });
     if (!response.ok) {
       const result = await response.json();
       throw new Error(result.error || 'Não foi possível compor a notícia no vídeo.');
@@ -270,75 +268,12 @@ async function exportNewsSelection(start, end) {
     const downloadUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = downloadUrl;
-    link.download = `${(analysis?.title || 'meusvideos').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.mp4`;
+    link.download = `${(analysis?.title || 'meusvideos').normalize('NFKD').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.mp4`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-    notify('Vídeo com notícia renderizado localmente em MP4.');
+    notify(includeNews ? 'Vídeo com notícia exportado em MP4.' : 'Trecho exportado localmente em MP4.');
   } catch (error) {
     notify(error.message || 'Falha ao compor a notícia no vídeo.');
-  } finally {
-    exportButton.innerHTML = '<span aria-hidden="true">↓</span> Exportar trecho';
-    updateTimeline();
-  }
-}
-
-async function exportSelection() {
-  const start = Number(startInput.value);
-  const end = Number(endInput.value);
-  if (newsClip && newsClip.start < end && newsClip.start + newsClip.duration > start) {
-    await exportNewsSelection(start, end);
-    return;
-  }
-  if (!video.captureStream || !window.MediaRecorder) {
-    notify('A exportação de vídeo exige um navegador Chromium atualizado.');
-    return;
-  }
-  exportButton.disabled = true;
-  exportButton.textContent = 'Preparando…';
-  try {
-    video.pause();
-    await waitForSeek(start);
-    const stream = video.captureStream();
-    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') ? 'video/webm;codecs=vp9,opus' : 'video/webm';
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const chunks = [];
-    const finished = new Promise((resolve, reject) => {
-      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-      recorder.onerror = () => reject(new Error('Falha ao gravar o trecho.'));
-      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
-    });
-    recorder.start();
-    await video.play();
-    await new Promise((resolve, reject) => {
-      const checkEnd = () => {
-        if (video.currentTime >= end || video.ended) {
-          video.pause();
-          if (recorder.state !== 'inactive') recorder.stop();
-          resolve();
-        }
-      };
-      const timeout = setTimeout(() => {
-        video.pause();
-        if (recorder.state !== 'inactive') recorder.stop();
-        reject(new Error('Tempo esgotado durante a exportação.'));
-      }, Math.max(15000, (end - start) * 3000));
-      video.addEventListener('timeupdate', checkEnd);
-      recorder.addEventListener('stop', () => {
-        clearTimeout(timeout);
-        video.removeEventListener('timeupdate', checkEnd);
-      }, { once: true });
-      video.addEventListener('error', () => reject(new Error('Não foi possível reproduzir o vídeo para exportação.')), { once: true });
-    });
-    const blob = await finished;
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = `${(analysis?.title || 'meusvideos').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase()}.webm`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-    notify('Trecho exportado em WebM.');
-  } catch (error) {
-    notify(error.message || 'Falha ao exportar o trecho.');
   } finally {
     exportButton.innerHTML = '<span aria-hidden="true">↓</span> Exportar trecho';
     updateTimeline();
